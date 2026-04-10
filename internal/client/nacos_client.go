@@ -19,6 +19,7 @@ const (
 	AuthTypeNacos  = "nacos"  // Username/password authentication
 	AuthTypeAliyun = "aliyun" // AccessKey/SecretKey authentication
 	AuthTypeToken  = "token"  // Pre-issued access token (no login required)
+	AuthTypeRole   = "role"   // Role assumption via credential-provider SDK (STS)
 )
 
 // NacosClient represents a Nacos API client
@@ -32,8 +33,11 @@ type NacosClient struct {
 	SecretKey        string
 	AccessToken      string
 	TokenExpireAt    time.Time
-	authLoginVersion string // "v3" or "v1", determined by first successful login
+	SecurityToken    string         // STS security token (role auth)
+	RoleArn          string         // Role ARN for role assumption
+	authLoginVersion string         // "v3" or "v1", determined by first successful login
 	httpClient       *resty.Client
+	roleProvider     *roleProvider  // credential provider for role auth
 }
 
 // Config represents a Nacos configuration
@@ -116,13 +120,15 @@ func ParseHTTPError(statusCode int, body []byte, operation string) error {
 // NewNacosClient creates a new Nacos client with automatic authentication.
 // If token is non-empty, it is used directly as the Bearer token and no login request is made.
 // Returns an error if login is required but fails (e.g. wrong credentials).
-func NewNacosClient(serverAddr, namespace, authType, username, password, accessKey, secretKey, token string) (*NacosClient, error) {
+func NewNacosClient(serverAddr, namespace, authType, username, password, accessKey, secretKey, token, roleArn string) (*NacosClient, error) {
 	if namespace == "" {
 		namespace = "public"
 	}
 	if authType == "" {
 		if token != "" {
 			authType = AuthTypeToken
+		} else if roleArn != "" {
+			authType = AuthTypeRole
 		} else if accessKey != "" && secretKey != "" {
 			authType = AuthTypeAliyun
 		} else if username != "" && password != "" {
@@ -141,6 +147,7 @@ func NewNacosClient(serverAddr, namespace, authType, username, password, accessK
 		AccessKey:   accessKey,
 		SecretKey:   secretKey,
 		AccessToken: token,
+		RoleArn:     roleArn,
 		httpClient:  resty.New(),
 	}
 
@@ -149,12 +156,39 @@ func NewNacosClient(serverAddr, namespace, authType, username, password, accessK
 		return c, nil
 	}
 
-	if c.AuthType == AuthTypeNacos {
+	switch c.AuthType {
+	case AuthTypeNacos:
 		if err := c.login(); err != nil {
 			return nil, fmt.Errorf("login failed: %w", err)
 		}
+	case AuthTypeRole:
+		if err := c.initRoleAuth(); err != nil {
+			return nil, fmt.Errorf("role auth init failed: %w", err)
+		}
 	}
 	return c, nil
+}
+
+// initRoleAuth initialises the credential-provider SDK and obtains initial STS credentials.
+func (c *NacosClient) initRoleAuth() error {
+	rp, err := newRoleProvider(c.RoleArn, "", "") // regionID/appName resolved from env inside provider
+	if err != nil {
+		return err
+	}
+	c.roleProvider = rp
+	return c.refreshRoleCredentials()
+}
+
+// refreshRoleCredentials fetches fresh STS credentials from the role provider.
+func (c *NacosClient) refreshRoleCredentials() error {
+	cred, err := c.roleProvider.GetCredential()
+	if err != nil {
+		return err
+	}
+	c.AccessKey = cred.AccessKeyID
+	c.SecretKey = cred.AccessKeySecret
+	c.SecurityToken = cred.SecurityToken
+	return nil
 }
 
 // isLocalAddr checks if the server address is localhost
@@ -249,6 +283,10 @@ func (c *NacosClient) EnsureTokenValid() error {
 	if c.AuthType == AuthTypeToken {
 		return nil
 	}
+	// Role auth: refresh STS credentials via provider
+	if c.AuthType == AuthTypeRole {
+		return c.refreshRoleCredentials()
+	}
 	if c.AuthType != AuthTypeNacos {
 		return nil
 	}
@@ -284,7 +322,7 @@ func spasSign(signData, secretKey string) string {
 
 // setSpasHeaders sets Aliyun authentication headers for SPAS signature
 func (c *NacosClient) setSpasHeaders(req *resty.Request, tenant, group string) {
-	if c.AuthType != AuthTypeAliyun || c.AccessKey == "" || c.SecretKey == "" {
+	if (c.AuthType != AuthTypeAliyun && c.AuthType != AuthTypeRole) || c.AccessKey == "" || c.SecretKey == "" {
 		return
 	}
 	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
@@ -296,6 +334,9 @@ func (c *NacosClient) setSpasHeaders(req *resty.Request, tenant, group string) {
 	}
 	signData := getSignData(normalizedTenant, group, ts)
 	req.SetHeader("Spas-Signature", spasSign(signData, c.SecretKey))
+	if c.SecurityToken != "" {
+		req.SetHeader("Spas-SecurityToken", c.SecurityToken)
+	}
 }
 
 // ListConfigs retrieves a list of configurations using v3 or v1 API based on login version

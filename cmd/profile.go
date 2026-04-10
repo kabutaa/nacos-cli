@@ -100,6 +100,7 @@ Examples:
 				cfg.AccessKey,
 				cfg.SecretKey,
 				cfg.Token,
+				cfg.RoleArn,
 			)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)

@@ -22,12 +22,13 @@ const (
 type Config struct {
 	Host      string `yaml:"host"`
 	Port      int    `yaml:"port"`
-	AuthType  string `yaml:"authType"` // nacos | aliyun | token
+	AuthType  string `yaml:"authType"` // nacos | aliyun | token | role
 	Username  string `yaml:"username"`
 	Password  string `yaml:"password"`
 	Token     string `yaml:"token"`     // Pre-issued access token (skips username/password login)
 	AccessKey string `yaml:"accessKey"` // Aliyun AK（AuthType=aliyun 时使用）
 	SecretKey string `yaml:"secretKey"` // Aliyun SK
+	RoleArn   string `yaml:"roleArn"`   // Role ARN for role assumption（AuthType=role 时使用）
 	Namespace string `yaml:"namespace"`
 }
 
@@ -145,6 +146,10 @@ func (c *Config) IsComplete() bool {
 		return c.AccessKey != "" && c.SecretKey != ""
 	}
 
+	if authType == "role" {
+		return c.RoleArn != ""
+	}
+
 	// Nacos auth requires username and password
 	return c.Username != "" && c.Password != ""
 }
@@ -175,6 +180,10 @@ func (c *Config) GetMissingFields() []string {
 		}
 		if c.SecretKey == "" {
 			missing = append(missing, "secretKey")
+		}
+	} else if authType == "role" {
+		if c.RoleArn == "" {
+			missing = append(missing, "roleArn")
 		}
 	} else {
 		// Nacos auth
@@ -264,7 +273,7 @@ func (c *Config) PromptForMissingFields() error {
 
 	// Prompt for auth type if not set
 	if c.AuthType == "" {
-		fmt.Print("Enter auth type (none/nacos/aliyun) [none]: ")
+		fmt.Print("Enter auth type (none/nacos/aliyun/role) [none]: ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read auth type: %w", err)
@@ -272,10 +281,10 @@ func (c *Config) PromptForMissingFields() error {
 		input = strings.TrimSpace(strings.ToLower(input))
 		if input == "" {
 			c.AuthType = "none"
-		} else if input == "none" || input == "nacos" || input == "aliyun" {
+		} else if input == "none" || input == "nacos" || input == "aliyun" || input == "role" {
 			c.AuthType = input
 		} else {
-			return fmt.Errorf("invalid auth type: %s (must be 'none', 'nacos' or 'aliyun')", input)
+			return fmt.Errorf("invalid auth type: %s (must be 'none', 'nacos', 'aliyun' or 'role')", input)
 		}
 	}
 
@@ -319,6 +328,18 @@ func (c *Config) PromptForMissingFields() error {
 				return fmt.Errorf("password is required")
 			}
 			c.Password = password
+		}
+	} else if c.AuthType == "role" {
+		if c.RoleArn == "" {
+			fmt.Print("Enter RoleArn: ")
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read roleArn: %w", err)
+			}
+			c.RoleArn = strings.TrimSpace(input)
+			if c.RoleArn == "" {
+				return fmt.Errorf("roleArn is required for role auth")
+			}
 		}
 	}
 	// authType == "none": skip credential prompts
@@ -460,15 +481,15 @@ func (c *Config) PromptForUpdate() error {
 	if currentAuthType == "" {
 		currentAuthType = "none"
 	}
-	fmt.Printf("Enter auth type (none/nacos/aliyun) [%s]: ", currentAuthType)
+	fmt.Printf("Enter auth type (none/nacos/aliyun/role) [%s]: ", currentAuthType)
 	input, err = reader.ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("failed to read auth type: %w", err)
 	}
 	input = strings.TrimSpace(strings.ToLower(input))
 	if input != "" {
-		if input != "none" && input != "nacos" && input != "aliyun" {
-			return fmt.Errorf("invalid auth type: %s (must be 'none', 'nacos' or 'aliyun')", input)
+		if input != "none" && input != "nacos" && input != "aliyun" && input != "role" {
+			return fmt.Errorf("invalid auth type: %s (must be 'none', 'nacos', 'aliyun' or 'role')", input)
 		}
 		c.AuthType = input
 	} else if c.AuthType == "" {
@@ -541,6 +562,25 @@ func (c *Config) PromptForUpdate() error {
 		}
 		if c.Password == "" {
 			return fmt.Errorf("password is required")
+		}
+	} else if c.AuthType == "role" {
+		// Role auth - RoleArn
+		currentRoleArn := formatCurrent(c.RoleArn, false)
+		if currentRoleArn != "" {
+			fmt.Printf("Enter RoleArn [%s]: ", currentRoleArn)
+		} else {
+			fmt.Print("Enter RoleArn: ")
+		}
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read roleArn: %w", err)
+		}
+		input = strings.TrimSpace(input)
+		if input != "" {
+			c.RoleArn = input
+		}
+		if c.RoleArn == "" {
+			return fmt.Errorf("roleArn is required for role auth")
 		}
 	}
 	// authType == "none": skip credential prompts

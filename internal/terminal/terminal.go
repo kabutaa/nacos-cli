@@ -54,6 +54,15 @@ func (t *Terminal) getPrompt() string {
 		}
 	case client.AuthTypeToken:
 		return "\033[32m(token)nacos>\033[0m "
+	case client.AuthTypeRole:
+		if t.client.RoleArn != "" {
+			arn := t.client.RoleArn
+			if len(arn) > 16 {
+				arn = arn[:16]
+			}
+			return fmt.Sprintf("\033[32m%s@nacos>\033[0m ", arn)
+		}
+		return "\033[32m(role)nacos>\033[0m "
 	}
 	return "\033[32mnacos>\033[0m "
 }
@@ -174,6 +183,12 @@ func (t *Terminal) printWelcome() {
 		}
 	case client.AuthTypeToken:
 		fmt.Printf("\033[33mAuth:\033[0m Token (authenticated)\n")
+	case client.AuthTypeRole:
+		if t.client.RoleArn != "" {
+			fmt.Printf("\033[33mAuth:\033[0m Role (%s)\n", t.client.RoleArn)
+		} else {
+			fmt.Printf("\033[33mAuth:\033[0m Role assumption\n")
+		}
 	case client.AuthTypeNone:
 		fmt.Printf("\033[33mAuth:\033[0m None (public access)\n")
 	}
@@ -399,6 +414,11 @@ func (t *Terminal) getAuthTypeDisplay() string {
 		return "aliyun"
 	case client.AuthTypeToken:
 		return "token (authenticated)"
+	case client.AuthTypeRole:
+		if t.client.RoleArn != "" {
+			return fmt.Sprintf("role (roleArn: %s)", t.client.RoleArn)
+		}
+		return "role"
 	case client.AuthTypeNone:
 		return "none (public access)"
 	default:

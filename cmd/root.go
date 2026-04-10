@@ -22,6 +22,7 @@ var (
 	token       string
 	accessKey   string
 	secretKey   string
+	roleArn     string
 	configFile  string
 	profileName string // Profile name for config file (default, dev, prod, etc.)
 )
@@ -56,7 +57,7 @@ Examples:
 		var err error
 
 		// Check if any connection parameters are provided via command line
-		hasCommandLineConfig := host != "" || port > 0 || serverAddr != "" || username != "" || password != "" || token != "" || accessKey != "" || secretKey != ""
+		hasCommandLineConfig := host != "" || port > 0 || serverAddr != "" || username != "" || password != "" || token != "" || accessKey != "" || secretKey != "" || roleArn != ""
 
 		if configFile != "" {
 			// Explicit config file specified
@@ -139,6 +140,11 @@ Examples:
 			secretKey = fileConfig.SecretKey
 		}
 
+		// RoleArn: command line > config file（AuthType=role 时使用）
+		if roleArn == "" && fileConfig != nil {
+			roleArn = fileConfig.RoleArn
+		}
+
 		// Set default server address only when neither --host nor --port is provided.
 		if serverAddr == "" {
 			serverAddr = "market.hiclaw.io:80"
@@ -181,6 +187,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "Access token (skips username/password login)")
 	rootCmd.PersistentFlags().StringVar(&accessKey, "access-key", "", "AccessKey (aliyun auth)")
 	rootCmd.PersistentFlags().StringVar(&secretKey, "secret-key", "", "SecretKey (aliyun auth)")
+	rootCmd.PersistentFlags().StringVar(&roleArn, "role-arn", "", "RoleArn for role assumption auth")
 
 	// Mark legacy server flag as deprecated but still functional
 	rootCmd.PersistentFlags().MarkDeprecated("server", "use --host and --port instead")
@@ -195,7 +202,7 @@ func checkError(err error) {
 
 // mustNewNacosClient creates a NacosClient and exits with a clear error message on failure (e.g. login failed).
 func mustNewNacosClient() *client.NacosClient {
-	c, err := client.NewNacosClient(serverAddr, namespace, authType, username, password, accessKey, secretKey, token)
+	c, err := client.NewNacosClient(serverAddr, namespace, authType, username, password, accessKey, secretKey, token, roleArn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
