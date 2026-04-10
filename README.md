@@ -252,10 +252,16 @@ nacos> quit           # Exit terminal
 | --host | | market.hiclaw.io when `--host` and `--port` are both omitted; otherwise 127.0.0.1 when only `--port` is provided | Nacos server host |
 | --port | | 80 when `--host` and `--port` are both omitted; otherwise 8848 when omitted after `--host` | Nacos server port |
 | --server | -s | market.hiclaw.io:80 when no host/port is provided | Nacos server address (deprecated, use --host and --port) |
+| --auth-type | | auto-detect | Auth type: `none`, `nacos`, `aliyun`, `token`, `role` |
 | --username | -u | nacos | Nacos username |
 | --password | -p | nacos | Nacos password |
+| --token | | | Pre-issued access token (skips username/password login) |
+| --access-key | | | AccessKey (aliyun auth) |
+| --secret-key | | | SecretKey (aliyun auth) |
+| --role-arn | | | RoleArn for role assumption auth (STS) |
 | --namespace | -n | (empty/public) | Nacos namespace ID |
 | --config | -c | | Path to configuration file |
+| --profile | | default | Profile name (loads ~/.nacos-cli/<profile>.conf) |
 | --help | -h | | Show help information |
 
 ## Configuration File
@@ -287,14 +293,76 @@ host: 127.0.0.1
 # Nacos server port
 port: 8848
 
-# Username for authentication
+# Auth type: none | nacos | aliyun | token | role
+authType: nacos
+
+# Username for authentication (authType: nacos)
 username: nacos
 
-# Password for authentication
+# Password for authentication (authType: nacos)
 password: nacos
 
 # Namespace ID (optional, leave empty for public namespace)
 namespace: ""
+```
+
+### Authentication Types
+
+#### 1. Nacos Auth (`authType: nacos`)
+
+Username/password authentication. The CLI logs in to obtain an `accessToken` and refreshes it automatically.
+
+```bash
+nacos-cli --auth-type nacos -u nacos -p nacos
+```
+
+#### 2. Aliyun Auth (`authType: aliyun`)
+
+AccessKey/SecretKey with SPAS signature.
+
+```bash
+nacos-cli --auth-type aliyun --access-key <AK> --secret-key <SK>
+```
+
+#### 3. Token Auth (`authType: token`)
+
+Pre-issued access token, skips login.
+
+```bash
+nacos-cli --token <YOUR_TOKEN>
+```
+
+#### 4. Role Auth (`authType: role`)
+
+Obtains temporary STS credentials (AK/SK/SecurityToken) via credential-provider SDK role assumption, then uses SPAS signature to authenticate with Nacos.
+
+**Prerequisites:**
+- Set environment variables: `NACOS_REGION_ID` and `NACOS_APP_NAME`
+- Have the credential-provider SDK properly configured in your environment
+
+```bash
+# Via CLI flags
+export NACOS_REGION_ID=cn-hangzhou
+export NACOS_APP_NAME=my-app
+nacos-cli --auth-type role --role-arn <YOUR_ROLE_ARN>
+
+# Via config file
+cat > ~/.nacos-cli/default.conf << EOF
+host: your-nacos-server
+port: 8848
+authType: role
+roleArn: your-role-arn
+namespace: ""
+EOF
+nacos-cli
+```
+
+#### 5. No Auth (`authType: none`)
+
+Public access without credentials.
+
+```bash
+nacos-cli --auth-type none --host public-registry
 ```
 
 ### Configuration Priority
